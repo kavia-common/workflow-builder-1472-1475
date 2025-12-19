@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkflowStore, NodeTypes, EdgeTypes } from "../store/useWorkflowStore";
 
 // Geometry helpers
@@ -14,6 +14,10 @@ function lineBetween(n1, n2) {
 
 function pathStraight({ x1, y1, x2, y2 }) {
   return `M${x1},${y1} L${x2},${y2}`;
+}
+
+function edgeMidpoint({ x1, y1, x2, y2 }) {
+  return { mx: (x1 + x2) / 2, my: (y1 + y2) / 2 };
 }
 
 // Basic hit test for resize handle area
@@ -98,7 +102,7 @@ export default function Canvas() {
   }
 
   const onCanvasMouseDown = (e) => {
-    const isMiddle = e.button === 1 || e.button === 0 && e.altKey;
+    const isMiddle = e.button === 1 || (e.button === 0 && e.altKey);
     if (isMiddle) {
       setDrag({ mode: "pan", startX: e.clientX, startY: e.clientY });
       return;
@@ -142,7 +146,7 @@ export default function Canvas() {
     setDrag({ mode: "move", id: n.id, lastX: pt.x, lastY: pt.y });
   };
 
-  const nodeHandleMouseDown = (e, n, handleType) => {
+  const nodeHandleMouseDown = (e, n) => {
     e.stopPropagation();
     const c = getNodeCenter(n);
     const type =
@@ -179,10 +183,76 @@ export default function Canvas() {
       <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
         <path d="M0,0 L10,3 L0,6 z" fill="#94A3B8" />
       </marker>
+      {/* Shadow filter for badges to enhance readability */}
+      <filter id="badgeShadow" x="-50%" y="-50%" width="200%" height="200%">
+        <feDropShadow dx="0" dy="1" stdDeviation="1.2" floodColor="rgba(0,0,0,0.25)" />
+      </filter>
     </defs>
   );
 
   const worldTransform = `translate(${ui.offsetX}, ${ui.offsetY}) scale(${ui.zoom})`;
+
+  // Render edge path and optional badge
+  const renderEdgeWithBadge = (e) => {
+    const a = nodes.find((n) => n.id === e.source);
+    const b = nodes.find((n) => n.id === e.target);
+    if (!a || !b) return null;
+
+    const seg = lineBetween(a, b);
+    const d = pathStraight(seg);
+    const mid = edgeMidpoint(seg);
+    const selected = selection.edgeId === e.id ? "selected" : "";
+
+    const cls =
+      e.type === EdgeTypes.CONDITIONAL_TRUE
+        ? "edge conditional_true"
+        : e.type === EdgeTypes.CONDITIONAL_FALSE
+        ? "edge conditional_false"
+        : e.type === EdgeTypes.PARALLEL
+        ? "edge parallel"
+        : "edge";
+
+    // Badge content and color by type
+    let badgeText = null;
+    let badgeClass = "edge-badge neutral";
+    if (e.type === EdgeTypes.CONDITIONAL_TRUE) {
+      badgeText = "True";
+      badgeClass = "edge-badge true";
+    } else if (e.type === EdgeTypes.CONDITIONAL_FALSE) {
+      badgeText = "False";
+      badgeClass = "edge-badge false";
+    } else if (e.type === EdgeTypes.PARALLEL) {
+      badgeText = ""; // optional tiny arrow or dot; keeping minimal for parallel
+      badgeClass = "edge-badge neutral";
+    } else {
+      badgeText = ""; // default: no label
+      badgeClass = "edge-badge neutral";
+    }
+
+    // We offset the badge slightly above the line for readability
+    const BADGE_OFFSET_Y = -8;
+
+    return (
+      <g key={e.id} className="edge-group">
+        <path className={`${cls} ${selected}`} d={d} onClick={(ev) => onEdgeClick(ev, e)} />
+        {/* Badge group should not block pointer events */}
+        {badgeText ? (
+          <g
+            className={`${badgeClass}${selected ? " selected" : ""}`}
+            transform={`translate(${mid.mx}, ${mid.my + BADGE_OFFSET_Y})`}
+            aria-label={`Edge label ${badgeText}`}
+          >
+            <g filter="url(#badgeShadow)">
+              <rect x={-18} y={-10} rx="10" ry="10" width="36" height="20" />
+            </g>
+            <text textAnchor="middle" dominantBaseline="middle">
+              {badgeText}
+            </text>
+          </g>
+        ) : null}
+      </g>
+    );
+  };
 
   return (
     <div className="canvas-wrap" onDrop={onDrop} onDragOver={onDragOver}>
@@ -197,25 +267,7 @@ export default function Canvas() {
         {defs}
         <g transform={worldTransform}>
           {/* Edges */}
-          {edges.map((e) => {
-            const a = nodes.find((n) => n.id === e.source);
-            const b = nodes.find((n) => n.id === e.target);
-            if (!a || !b) return null;
-            const s = lineBetween(a, b);
-            const d = pathStraight(s);
-            const selected = selection.edgeId === e.id ? "selected" : "";
-            const cls =
-              e.type === EdgeTypes.CONDITIONAL_TRUE
-                ? "edge conditional_true"
-                : e.type === EdgeTypes.CONDITIONAL_FALSE
-                ? "edge conditional_false"
-                : e.type === EdgeTypes.PARALLEL
-                ? "edge parallel"
-                : "edge";
-            return (
-              <path key={e.id} className={`${cls} ${selected}`} d={d} onClick={(ev) => onEdgeClick(ev, e)} />
-            );
-          })}
+          {edges.map((e) => renderEdgeWithBadge(e))}
 
           {/* Temp edge */}
           {tempEdge && <path className={`edge ${tempEdge.type || ""}`} d={pathStraight(tempEdge)} />}
@@ -236,7 +288,7 @@ export default function Canvas() {
                 cx={n.width}
                 cy={n.height / 2}
                 r="6"
-                onMouseDown={(e) => nodeHandleMouseDown(e, n, "right")}
+                onMouseDown={(e) => nodeHandleMouseDown(e, n)}
               />
               {/* Resize Handle */}
               <rect
@@ -335,9 +387,8 @@ function NodeShape({ n }) {
             strokeWidth="1.5"
           />
           <path
-            d={`M${n.width / 3},8 L${n.width / 3},${n.height - 8} M${(2 * n.width) / 3},8 L${(2 * n.width) / 3},${
-              n.height - 8
-            }`}
+            d={`M${n.width / 3},8 L${n.width / 3},${n.height - 8} M${(2 * n.width) / 3},8 L${(2 * n.width) / 3},${n.height - 8
+              }`}
             stroke={fillByType.stroke}
             strokeWidth="3"
           />

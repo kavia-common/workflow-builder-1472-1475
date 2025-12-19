@@ -212,6 +212,41 @@ body {
 
 .edge.selected { stroke-width: 3; }
 
+/* Edge badge styles (SVG) */
+.edge-badge {
+  pointer-events: none; /* ensure labels do not block edge clicking */
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.edge-badge rect {
+  stroke: rgba(0,0,0,0.15);
+  stroke-width: 0.75px;
+}
+
+.edge-badge text {
+  fill: #fff;
+}
+
+/* True/False color tokens from Ocean Professional theme */
+.edge-badge.true rect {
+  fill: var(--success); /* #10B981 */
+}
+
+.edge-badge.false rect {
+  fill: var(--error); /* #EF4444 */
+}
+
+/* Neutral for default/parallel (kept minimal) */
+.edge-badge.neutral rect {
+  fill: rgba(15, 23, 42, 0.35);
+}
+
+.edge-badge.selected rect {
+  stroke-width: 1.25px;
+  stroke: var(--secondary);
+}
+
 .handle {
   fill: #fff;
   stroke: var(--primary);
