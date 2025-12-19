@@ -149,9 +149,10 @@ export default function Canvas() {
   const nodeHandleMouseDown = (e, n) => {
     e.stopPropagation();
     const c = getNodeCenter(n);
+    // For Decision -> create generalized conditional edge
     const type =
       n.type === NodeTypes.DECISION
-        ? EdgeTypes.CONDITIONAL_TRUE
+        ? EdgeTypes.CONDITIONAL
         : n.type === NodeTypes.PARALLEL
         ? EdgeTypes.PARALLEL
         : EdgeTypes.DEFAULT;
@@ -203,6 +204,11 @@ export default function Canvas() {
     const mid = edgeMidpoint(seg);
     const selected = selection.edgeId === e.id ? "selected" : "";
 
+    const isConditional =
+      e.type === EdgeTypes.CONDITIONAL ||
+      e.type === EdgeTypes.CONDITIONAL_TRUE ||
+      e.type === EdgeTypes.CONDITIONAL_FALSE;
+
     const cls =
       e.type === EdgeTypes.CONDITIONAL_TRUE
         ? "edge conditional_true"
@@ -210,32 +216,40 @@ export default function Canvas() {
         ? "edge conditional_false"
         : e.type === EdgeTypes.PARALLEL
         ? "edge parallel"
+        : isConditional
+        ? "edge conditional_true" // default to green stroke for conditional group (keeps visuals)
         : "edge";
 
     // Badge content and color by type
     let badgeText = null;
     let badgeClass = "edge-badge neutral";
-    if (e.type === EdgeTypes.CONDITIONAL_TRUE) {
+    if (e.type === EdgeTypes.PARALLEL) {
+      badgeText = "";
+      badgeClass = "edge-badge neutral";
+    } else if (e.type === EdgeTypes.CONDITIONAL_TRUE) {
       badgeText = "True";
       badgeClass = "edge-badge true";
     } else if (e.type === EdgeTypes.CONDITIONAL_FALSE) {
       badgeText = "False";
       badgeClass = "edge-badge false";
-    } else if (e.type === EdgeTypes.PARALLEL) {
-      badgeText = ""; // optional tiny arrow or dot; keeping minimal for parallel
-      badgeClass = "edge-badge neutral";
+    } else if (e.type === EdgeTypes.CONDITIONAL) {
+      const label = e?.data?.label || e?.data?.branchKey;
+      badgeText = label || "";
+      // Keep legacy colors only for explicit true/false; otherwise neutral for N-way
+      const key = (e?.data?.branchKey || "").toLowerCase();
+      if (key === "true") badgeClass = "edge-badge true";
+      else if (key === "false") badgeClass = "edge-badge false";
+      else badgeClass = "edge-badge neutral";
     } else {
-      badgeText = ""; // default: no label
+      badgeText = "";
       badgeClass = "edge-badge neutral";
     }
 
-    // We offset the badge slightly above the line for readability
     const BADGE_OFFSET_Y = -8;
 
     return (
       <g key={e.id} className="edge-group">
         <path className={`${cls} ${selected}`} d={d} onClick={(ev) => onEdgeClick(ev, e)} />
-        {/* Badge group should not block pointer events */}
         {badgeText ? (
           <g
             className={`${badgeClass}${selected ? " selected" : ""}`}

@@ -12,13 +12,41 @@ export const NodeTypes = {
 
 export const EdgeTypes = {
   DEFAULT: "default",
+  // Legacy constants kept for compatibility
   CONDITIONAL_TRUE: "conditional_true",
   CONDITIONAL_FALSE: "conditional_false",
   PARALLEL: "parallel",
+  // New generalized conditional
+  CONDITIONAL: "conditional",
 };
 
 // Helpers
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+/**
+ * Migrate edges to new conditional type while supporting legacy.
+ * - conditional_true  -> type: "conditional", data.branchKey="true",  data.label="True"
+ * - conditional_false -> type: "conditional", data.branchKey="false", data.label="False"
+ */
+function migrateEdges(edges = []) {
+  return (edges || []).map((e) => {
+    if (e?.type === EdgeTypes.CONDITIONAL_TRUE) {
+      return {
+        ...e,
+        type: EdgeTypes.CONDITIONAL,
+        data: { ...(e.data || {}), branchKey: e?.data?.branchKey || "true", label: e?.data?.label || "True" },
+      };
+    }
+    if (e?.type === EdgeTypes.CONDITIONAL_FALSE) {
+      return {
+        ...e,
+        type: EdgeTypes.CONDITIONAL,
+        data: { ...(e.data || {}), branchKey: e?.data?.branchKey || "false", label: e?.data?.label || "False" },
+      };
+    }
+    return e;
+  });
+}
 
 // Model validation utilities
 function validateModel(nodes, edges) {
@@ -27,7 +55,8 @@ function validateModel(nodes, edges) {
   if (startNodes.length > 1) {
     errors.push("Only one Start node is allowed.");
   }
-  edges.forEach((e) => {
+  const eList = migrateEdges(edges); // validate with migrated view
+  eList.forEach((e) => {
     const src = nodes.find((n) => n.id === e.source);
     const tgt = nodes.find((n) => n.id === e.target);
     if (!src || !tgt) {
@@ -43,13 +72,37 @@ function validateModel(nodes, edges) {
   return { valid: errors.length === 0, errors };
 }
 
+/**
+ * PUBLIC_INTERFACE
+ * Check that for a given Decision node, outgoing conditional edges have unique branchKey values.
+ * Returns: { ok: boolean, duplicates: string[] } where duplicates are the repeated branchKeys
+ */
+export function validateDecisionBranchKeys(nodeId, nodes = [], edges = []) {
+  const node = nodes.find((n) => n.id === nodeId);
+  if (!node || node.type !== NodeTypes.DECISION) return { ok: true, duplicates: [] };
+  const migrated = migrateEdges(edges);
+  const outgoing = migrated.filter((e) => e.source === nodeId && e.type === EdgeTypes.CONDITIONAL);
+  const seen = new Map();
+  const dups = new Set();
+  outgoing.forEach((e) => {
+    const key = e?.data?.branchKey;
+    if (!key) return;
+    if (seen.has(key)) dups.add(key);
+    else seen.set(key, true);
+  });
+  return { ok: dups.size === 0, duplicates: Array.from(dups) };
+}
+
 function initialState() {
   const saved = localStorage.getItem("workflow_state");
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
+      // run migration on edges
+      const migratedEdges = migrateEdges(parsed.edges || []);
       return {
         ...parsed,
+        edges: migratedEdges,
         ui: {
           ...parsed.ui,
           zoom: parsed?.ui?.zoom ?? 1,
@@ -106,12 +159,14 @@ export const useWorkflowStore = create((set, get) => ({
   loadFromJSON: (json) =>
     set((state) => {
       let data = typeof json === "string" ? JSON.parse(json) : json;
-      const valid = validateModel(data.nodes || [], data.edges || []);
+      // migrate legacy conditional types on import
+      const migratedEdges = migrateEdges(data.edges || []);
+      const valid = validateModel(data.nodes || [], migratedEdges || []);
       return {
         history: pushHistory(state),
         future: [],
         nodes: data.nodes || [],
-        edges: data.edges || [],
+        edges: migratedEdges || [],
         metadata: data.metadata || { name: "Imported", description: "" },
         selection: { nodeId: null, edgeId: null },
         validation: valid,
@@ -121,16 +176,17 @@ export const useWorkflowStore = create((set, get) => ({
   // PUBLIC_INTERFACE
   exportToJSON: () => {
     const { nodes, edges, metadata } = get();
-    return JSON.stringify({ nodes, edges, metadata }, null, 2);
+    // ensure export serialized with migrated conditional edge type
+    const e = migrateEdges(edges);
+    return JSON.stringify({ nodes, edges: e, metadata }, null, 2);
   },
 
   // PUBLIC_INTERFACE
   saveToLocalStorage: () => {
     const { nodes, edges, metadata, ui } = get();
-    localStorage.setItem(
-      "workflow_state",
-      JSON.stringify({ nodes, edges, metadata, ui })
-    );
+    // save migrated view to include new fields
+    const e = migrateEdges(edges);
+    localStorage.setItem("workflow_state", JSON.stringify({ nodes, edges: e, metadata, ui }));
     set({ lastSavedAt: Date.now() });
   },
 
@@ -193,6 +249,9 @@ export const useWorkflowStore = create((set, get) => ({
     })),
 
   // PUBLIC_INTERFACE
+  /**
+   * Add an edge. For Decision nodes, callers can pass data.branchKey and data.label.
+   */
   addEdge: (source, target, type = EdgeTypes.DEFAULT, data = {}) =>
     set((state) => {
       if (source === target) return {};
@@ -201,8 +260,22 @@ export const useWorkflowStore = create((set, get) => ({
       if (!src || !tgt) return {};
       if (src.type === NodeTypes.END) return {};
       if (tgt.type === NodeTypes.START) return {};
+
+      // Normalize legacy conditional types to generalized conditional
+      let finalType = type;
+      let finalData = { ...(data || {}) };
+      if (type === EdgeTypes.CONDITIONAL_TRUE) {
+        finalType = EdgeTypes.CONDITIONAL;
+        finalData.branchKey = finalData.branchKey || "true";
+        finalData.label = finalData.label || "True";
+      } else if (type === EdgeTypes.CONDITIONAL_FALSE) {
+        finalType = EdgeTypes.CONDITIONAL;
+        finalData.branchKey = finalData.branchKey || "false";
+        finalData.label = finalData.label || "False";
+      }
+
       const id = nanoid(8);
-      const edge = { id, source, target, type, data };
+      const edge = { id, source, target, type: finalType, data: finalData };
       return {
         history: pushHistory(state),
         future: [],
@@ -222,11 +295,40 @@ export const useWorkflowStore = create((set, get) => ({
 
   // PUBLIC_INTERFACE
   updateEdgeType: (id, type) =>
+    set((state) => {
+      // normalize legacy -> conditional
+      let finalType = type;
+      let updateDataPatch = {};
+      if (type === EdgeTypes.CONDITIONAL_TRUE) {
+        finalType = EdgeTypes.CONDITIONAL;
+        updateDataPatch = { branchKey: "true", label: "True" };
+      } else if (type === EdgeTypes.CONDITIONAL_FALSE) {
+        finalType = EdgeTypes.CONDITIONAL;
+        updateDataPatch = { branchKey: "false", label: "False" };
+      }
+      return {
+        history: pushHistory(state),
+        future: [],
+        edges: state.edges.map((e) =>
+          e.id === id ? { ...e, type: finalType, data: { ...(e.data || {}), ...updateDataPatch } } : e
+        ),
+        // keep the same selection so the panel stays open
+        selection: state.selection?.edgeId === id ? state.selection : { nodeId: null, edgeId: id },
+      };
+    }),
+
+  // PUBLIC_INTERFACE
+  /**
+   * Update edge data fields (e.g., branchKey, label).
+   * Partial updates to edge.data are supported.
+   */
+  updateEdgeData: (id, dataPatch) =>
     set((state) => ({
       history: pushHistory(state),
       future: [],
-      edges: state.edges.map((e) => (e.id === id ? { ...e, type } : e)),
-      // keep the same selection so the panel stays open
+      edges: state.edges.map((e) =>
+        e.id === id ? { ...e, data: { ...(e.data || {}), ...(dataPatch || {}) } } : e
+      ),
       selection: state.selection?.edgeId === id ? state.selection : { nodeId: null, edgeId: id },
     })),
 

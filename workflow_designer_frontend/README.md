@@ -40,7 +40,15 @@ This app reads REACT_APP_* variables if present (no backend required):
   "nodes": [
     { "id":"...", "type":"task|start|decision|parallel|end", "title":"...", "description":"", "x":0, "y":0, "width":160, "height":60, "io":{"inputs":[],"outputs":[]} }
   ],
-  "edges":[ { "id":"...", "source":"nodeId", "target":"nodeId", "type":"default|conditional_true|conditional_false|parallel", "data":{} } ],
+  "edges":[
+    { "id":"...", "source":"nodeId", "target":"nodeId", "type":"default|conditional|parallel",
+      "data": { "branchKey": "unique-key-per-decision", "label": "Human label" } }
+  ],
   "metadata": { "name":"...", "description":"..." }
 }
 ```
+
+Notes:
+- The edge type for decision branches is now generalized to `conditional`.
+- Legacy types `conditional_true` and `conditional_false` are still accepted on import/load and are migrated to `conditional` with `data.branchKey` set to `"true"`/`"false"` and `data.label` set to `"True"`/`"False"`.
+- Export and persistence always output the new `conditional` type with `data.branchKey`/`data.label` when applicable.

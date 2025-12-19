@@ -137,6 +137,8 @@ function PropertiesPanel() {
               style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)", background: "#fff", color: "var(--text)" }}
             >
               <option value="default">default</option>
+              <option value="conditional">conditional</option>
+              {/* Legacy options retained for compatibility; selecting will migrate to "conditional" */}
               <option value="conditional_true">conditional_true</option>
               <option value="conditional_false">conditional_false</option>
               <option value="parallel">parallel</option>
