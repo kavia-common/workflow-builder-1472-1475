@@ -42,7 +42,11 @@ This app reads REACT_APP_* variables if present (no backend required):
   ],
   "edges":[
     { "id":"...", "source":"nodeId", "target":"nodeId", "type":"default|conditional|parallel",
-      "data": { "branchKey": "unique-key-per-decision", "label": "Human label" } }
+      "data": { 
+        "branchKey": "unique-key-per-decision",
+        "label": "Human label",
+        "parameters": { "threshold": 0.8, "mode": "strict" } 
+      } }
   ],
   "metadata": { "name":"...", "description":"..." }
 }
@@ -50,5 +54,6 @@ This app reads REACT_APP_* variables if present (no backend required):
 
 Notes:
 - The edge type for decision branches is now generalized to `conditional`.
-- Legacy types `conditional_true` and `conditional_false` are still accepted on import/load and are migrated to `conditional` with `data.branchKey` set to `"true"`/`"false"` and `data.label` set to `"True"`/`"False"`.
-- Export and persistence always output the new `conditional` type with `data.branchKey`/`data.label` when applicable.
+- Each conditional edge supports `data.parameters` (object) to carry branch-specific inputs for evaluation/execution.
+- Legacy types `conditional_true` and `conditional_false` are still accepted on import/load and are migrated to `conditional` with `data.branchKey` set to `"true"`/`"false"`, `data.label` set to `"True"`/`"False"`, and an empty `data.parameters` object if missing.
+- Export and persistence always output the new `conditional` type with `data.branchKey`/`data.label`/`data.parameters` when applicable.

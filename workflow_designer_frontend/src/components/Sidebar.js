@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { useWorkflowStore, NodeTypes } from "../store/useWorkflowStore";
+import React, { useMemo, useState, useEffect } from "react";
+import { useWorkflowStore, NodeTypes, EdgeTypes } from "../store/useWorkflowStore";
 
 // PUBLIC_INTERFACE
 export default function Sidebar() {
@@ -63,8 +63,40 @@ function PropertiesPanel() {
   const deleteNode = useWorkflowStore((s) => s.deleteNode);
   const deleteEdge = useWorkflowStore((s) => s.deleteEdge);
   const updateEdgeType = useWorkflowStore((s) => s.updateEdgeType);
+  const updateEdgeData = useWorkflowStore((s) => s.updateEdgeData);
   const metadata = useWorkflowStore((s) => s.metadata);
   const setMeta = useWorkflowStore((s) => (meta) => s.loadFromJSON({ nodes: s.nodes, edges: s.edges, metadata: { ...s.metadata, ...meta } }));
+
+  // Local UI state for parameters editor (JSON text) with basic validation
+  const [paramsText, setParamsText] = useState("");
+  const [paramsError, setParamsError] = useState(null);
+
+  // Sync editor when edge selection changes
+  useEffect(() => {
+    if (edge?.type === EdgeTypes.CONDITIONAL) {
+      const p = edge?.data?.parameters || {};
+      setParamsText(JSON.stringify(p, null, 2));
+      setParamsError(null);
+    } else {
+      setParamsText("");
+      setParamsError(null);
+    }
+  }, [edge]);
+
+  const onApplyParams = () => {
+    if (!edge) return;
+    try {
+      const parsed = paramsText ? JSON.parse(paramsText) : {};
+      if (parsed && typeof parsed === "object") {
+        updateEdgeData(edge.id, { parameters: parsed });
+        setParamsError(null);
+      } else {
+        setParamsError("Parameters must be a JSON object.");
+      }
+    } catch (e) {
+      setParamsError("Invalid JSON.");
+    }
+  };
 
   return (
     <div className="panel" aria-label="Properties">
@@ -146,6 +178,45 @@ function PropertiesPanel() {
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
               Current: <code>{edge.type}</code>
             </div>
+
+            {edge.type === EdgeTypes.CONDITIONAL && (
+              <>
+                <label>Branch Key</label>
+                <input
+                  value={edge?.data?.branchKey || ""}
+                  placeholder="e.g. true, false, or custom key"
+                  onChange={(e) => updateEdgeData(edge.id, { branchKey: e.target.value })}
+                />
+                <label>Branch Label</label>
+                <input
+                  value={edge?.data?.label || ""}
+                  placeholder="Human-friendly label"
+                  onChange={(e) => updateEdgeData(edge.id, { label: e.target.value })}
+                />
+                <label>Parameters (JSON)</label>
+                <textarea
+                  rows={6}
+                  value={paramsText}
+                  onChange={(e) => setParamsText(e.target.value)}
+                  placeholder='{"threshold": 0.8, "mode": "strict"}'
+                />
+                {paramsError ? (
+                  <div style={{ color: "var(--error)", fontSize: 12, marginTop: 4 }}>{paramsError}</div>
+                ) : (
+                  <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
+                    Provide a JSON object with branch-specific parameters for evaluation or execution.
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+                  <button className="btn" onClick={() => {
+                    // reset to serialized current store value
+                    setParamsText(JSON.stringify(edge?.data?.parameters || {}, null, 2));
+                    setParamsError(null);
+                  }}>Reset</button>
+                  <button className="btn btn-primary" onClick={onApplyParams}>Apply</button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

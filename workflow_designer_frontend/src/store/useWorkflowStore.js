@@ -24,27 +24,53 @@ export const EdgeTypes = {
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
 /**
+ * Safe parse JSON content from a string, returning a fallback on error.
+ */
+function safeJsonParse(text, fallback) {
+  try {
+    if (typeof text !== "string") return fallback;
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object") return parsed;
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * Migrate edges to new conditional type while supporting legacy.
  * - conditional_true  -> type: "conditional", data.branchKey="true",  data.label="True"
  * - conditional_false -> type: "conditional", data.branchKey="false", data.label="False"
+ * Also ensure data.parameters exists as an object for conditional edges.
  */
 function migrateEdges(edges = []) {
   return (edges || []).map((e) => {
+    let next = e;
     if (e?.type === EdgeTypes.CONDITIONAL_TRUE) {
-      return {
+      next = {
         ...e,
         type: EdgeTypes.CONDITIONAL,
         data: { ...(e.data || {}), branchKey: e?.data?.branchKey || "true", label: e?.data?.label || "True" },
       };
-    }
-    if (e?.type === EdgeTypes.CONDITIONAL_FALSE) {
-      return {
+    } else if (e?.type === EdgeTypes.CONDITIONAL_FALSE) {
+      next = {
         ...e,
         type: EdgeTypes.CONDITIONAL,
         data: { ...(e.data || {}), branchKey: e?.data?.branchKey || "false", label: e?.data?.label || "False" },
       };
     }
-    return e;
+
+    // Ensure parameters field for conditional edges
+    if (next?.type === EdgeTypes.CONDITIONAL) {
+      const currentParams = next?.data?.parameters;
+      const normalizedParams =
+        currentParams && typeof currentParams === "object" ? currentParams : {};
+      return {
+        ...next,
+        data: { ...(next.data || {}), parameters: normalizedParams },
+      };
+    }
+    return next;
   });
 }
 
@@ -159,7 +185,7 @@ export const useWorkflowStore = create((set, get) => ({
   loadFromJSON: (json) =>
     set((state) => {
       let data = typeof json === "string" ? JSON.parse(json) : json;
-      // migrate legacy conditional types on import
+      // migrate legacy conditional types on import and ensure parameters
       const migratedEdges = migrateEdges(data.edges || []);
       const valid = validateModel(data.nodes || [], migratedEdges || []);
       return {
@@ -176,7 +202,7 @@ export const useWorkflowStore = create((set, get) => ({
   // PUBLIC_INTERFACE
   exportToJSON: () => {
     const { nodes, edges, metadata } = get();
-    // ensure export serialized with migrated conditional edge type
+    // ensure export serialized with migrated conditional edge type and parameters
     const e = migrateEdges(edges);
     return JSON.stringify({ nodes, edges: e, metadata }, null, 2);
   },
@@ -250,7 +276,7 @@ export const useWorkflowStore = create((set, get) => ({
 
   // PUBLIC_INTERFACE
   /**
-   * Add an edge. For Decision nodes, callers can pass data.branchKey and data.label.
+   * Add an edge. For Decision nodes, callers can pass data.branchKey and data.label, and optional data.parameters (object).
    */
   addEdge: (source, target, type = EdgeTypes.DEFAULT, data = {}) =>
     set((state) => {
@@ -272,6 +298,14 @@ export const useWorkflowStore = create((set, get) => ({
         finalType = EdgeTypes.CONDITIONAL;
         finalData.branchKey = finalData.branchKey || "false";
         finalData.label = finalData.label || "False";
+      }
+
+      // Ensure parameters object for conditional edges
+      if (finalType === EdgeTypes.CONDITIONAL) {
+        finalData.parameters =
+          finalData.parameters && typeof finalData.parameters === "object"
+            ? finalData.parameters
+            : {};
       }
 
       const id = nanoid(8);
@@ -309,9 +343,16 @@ export const useWorkflowStore = create((set, get) => ({
       return {
         history: pushHistory(state),
         future: [],
-        edges: state.edges.map((e) =>
-          e.id === id ? { ...e, type: finalType, data: { ...(e.data || {}), ...updateDataPatch } } : e
-        ),
+        edges: state.edges.map((e) => {
+          if (e.id !== id) return e;
+          const nextType = finalType;
+          // when switching to conditional, ensure parameters object exists
+          const nextData =
+            nextType === EdgeTypes.CONDITIONAL
+              ? { ...(e.data || {}), ...updateDataPatch, parameters: { ...((e.data && e.data.parameters) || {}) } }
+              : { ...(e.data || {}), ...updateDataPatch };
+          return { ...e, type: nextType, data: nextData };
+        }),
         // keep the same selection so the panel stays open
         selection: state.selection?.edgeId === id ? state.selection : { nodeId: null, edgeId: id },
       };
@@ -319,16 +360,27 @@ export const useWorkflowStore = create((set, get) => ({
 
   // PUBLIC_INTERFACE
   /**
-   * Update edge data fields (e.g., branchKey, label).
+   * Update edge data fields (e.g., branchKey, label, parameters).
    * Partial updates to edge.data are supported.
    */
   updateEdgeData: (id, dataPatch) =>
     set((state) => ({
       history: pushHistory(state),
       future: [],
-      edges: state.edges.map((e) =>
-        e.id === id ? { ...e, data: { ...(e.data || {}), ...(dataPatch || {}) } } : e
-      ),
+      edges: state.edges.map((e) => {
+        if (e.id !== id) return e;
+        const patch = { ...(dataPatch || {}) };
+        // If parameters provided as string, try to parse; if object, take as-is.
+        if ("parameters" in patch) {
+          const incoming = patch.parameters;
+          const normalized =
+            typeof incoming === "string"
+              ? safeJsonParse(incoming, e.data?.parameters || {})
+              : (incoming && typeof incoming === "object" ? incoming : e.data?.parameters || {});
+          patch.parameters = normalized;
+        }
+        return { ...e, data: { ...(e.data || {}), ...patch } };
+      }),
       selection: state.selection?.edgeId === id ? state.selection : { nodeId: null, edgeId: id },
     })),
 
