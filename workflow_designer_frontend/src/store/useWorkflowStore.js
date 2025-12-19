@@ -221,6 +221,16 @@ export const useWorkflowStore = create((set, get) => ({
     })),
 
   // PUBLIC_INTERFACE
+  updateEdgeType: (id, type) =>
+    set((state) => ({
+      history: pushHistory(state),
+      future: [],
+      edges: state.edges.map((e) => (e.id === id ? { ...e, type } : e)),
+      // keep the same selection so the panel stays open
+      selection: state.selection?.edgeId === id ? state.selection : { nodeId: null, edgeId: id },
+    })),
+
+  // PUBLIC_INTERFACE
   selectNode: (id) => set({ selection: { nodeId: id, edgeId: null } }),
 
   // PUBLIC_INTERFACE

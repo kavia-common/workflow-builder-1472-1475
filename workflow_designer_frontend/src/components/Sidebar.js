@@ -62,6 +62,7 @@ function PropertiesPanel() {
   const updateNode = useWorkflowStore((s) => s.updateNode);
   const deleteNode = useWorkflowStore((s) => s.deleteNode);
   const deleteEdge = useWorkflowStore((s) => s.deleteEdge);
+  const updateEdgeType = useWorkflowStore((s) => s.updateEdgeType);
   const metadata = useWorkflowStore((s) => s.metadata);
   const setMeta = useWorkflowStore((s) => (meta) => s.loadFromJSON({ nodes: s.nodes, edges: s.edges, metadata: { ...s.metadata, ...meta } }));
 
@@ -128,8 +129,20 @@ function PropertiesPanel() {
               <strong>Edge</strong>
               <button className="btn" onClick={() => deleteEdge(edge.id)} title="Delete Edge">Delete</button>
             </div>
+            <label>Edge Type</label>
+            <select
+              value={edge.type}
+              onChange={(e) => updateEdgeType(edge.id, e.target.value)}
+              aria-label="Edge Type"
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid var(--border)", background: "#fff", color: "var(--text)" }}
+            >
+              <option value="default">default</option>
+              <option value="conditional_true">conditional_true</option>
+              <option value="conditional_false">conditional_false</option>
+              <option value="parallel">parallel</option>
+            </select>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
-              Type: <code>{edge.type}</code>
+              Current: <code>{edge.type}</code>
             </div>
           </div>
         )}
